@@ -1,187 +1,76 @@
-using FFXIVClientStructs.FFXIV.Component.GUI;
-using GlamourLog.Nodes;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
+using Dalamud.Interface.Windowing;
 using GlamourLog.Services;
-using KamiToolKit.BaseTypes;
-using KamiToolKit.Nodes;
 
 namespace GlamourLog;
 
-internal unsafe class FilterWindow : NativeAddon {
-    public const float WindowWidth = 456f;
-    public const float WindowHeight = 358f;
-    private readonly List<CheckboxNode> _checkboxes = [];
-    private TextButtonNode? _okButton;
-    private bool _hasPendingScreenOrigin;
-    private Vector2 _pendingScreenOrigin;
+internal sealed class FilterWindow : Window {
+    public const float WindowWidth = 300f;
+    public const float WindowHeight = 0f; // auto
+
+    public FilterWindow() : base("Set list filters##GlamourLogFilter") {
+        Size = new Vector2(WindowWidth, WindowHeight);
+        SizeCondition = ImGuiCond.FirstUseEver;
+    }
 
     public void OpenOrToggleNear(Vector2 screenTopLeft) {
         if (IsOpen) {
-            Close();
+            IsOpen = false;
             return;
         }
 
-        _pendingScreenOrigin = ClampFilterWindowTopLeft(screenTopLeft);
-        _hasPendingScreenOrigin = true;
-        Open();
+        Position = ClampFilterWindowTopLeft(screenTopLeft);
+        PositionCondition = ImGuiCond.Always;
+        IsOpen = true;
     }
 
-    public void CloseIfOpen() {
-        if (IsOpen)
-            Close();
-    }
+    public void CloseIfOpen() => IsOpen = false;
 
     public static Vector2 ClampFilterWindowTopLeft(Vector2 origin) {
-        var screen = AtkStage.Instance()->ScreenSize;
-        var maxX = Math.Max(0f, screen.Width - WindowWidth);
-        var maxY = Math.Max(0f, screen.Height - WindowHeight);
+        var screen = ImGuiHelpers.MainViewport.Size;
+        var maxX = Math.Max(0f, screen.X - WindowWidth);
+        var maxY = Math.Max(0f, screen.Y - 400f);
         return new Vector2(
             Math.Clamp(origin.X, 0f, maxX),
             Math.Clamp(origin.Y, 0f, maxY));
     }
 
-    protected override void OnSetup(AtkUnitBase* addon, Span<AtkValue> atkValueSpan) {
-        if (_hasPendingScreenOrigin) {
-            SetWindowPosition(_pendingScreenOrigin);
-            _hasPendingScreenOrigin = false;
+    public override void Draw() {
+        PositionCondition = ImGuiCond.FirstUseEver;
+
+        var changed = false;
+        changed |= Checkbox("Hide completed", "Hide sets where every piece is owned", c => c.HideCompleted, c => c.HideCompleted ^= true);
+        changed |= Checkbox("Hide incompatible items", "Hides all sets whose items are unwearable due to race or sex restrictions", c => c.HideIncompatible, c => c.HideIncompatible ^= true);
+        changed |= Checkbox("Hide unobtainable", "Hide sets that cannot currently be obtained (seasonal/old series). Completed sets still show.", c => c.HideUnobtainable, c => c.HideUnobtainable ^= true);
+        changed |= Checkbox("Hide mogstation", "Hide sets and pieces that come from the mogstation", c => c.HideMogstation, c => c.HideMogstation ^= true);
+        changed |= Checkbox("Hide uncontributable", "Hide sets where no piece is in your inventory to contribute to the set", c => c.HideUnready, c => c.HideUnready ^= true);
+        changed |= Checkbox("Hide shared models", "Hide outfits that share the same models. Will still show any sets that are started or completed.", c => c.HideSharedModels, c => c.HideSharedModels ^= true);
+        changed |= Checkbox("Show only completed", "Show only sets where every piece is owned", c => c.ShowOnlyCompleted, c => c.ShowOnlyCompleted ^= true);
+        changed |= Checkbox("Show only affordable sets", "Show only sets where you can afford the currency cost of all pieces", c => c.HideUnaffordable, c => c.HideUnaffordable ^= true);
+        changed |= Checkbox("Show only tradeable", "Show only sets whose pieces can be bought on the marketboard or traded", c => c.HideNoMarketboard, c => c.HideNoMarketboard ^= true);
+        changed |= Checkbox("Show only started", "Show only sets that are partially completed", c => c.HideNonPartials, c => c.HideNonPartials ^= true);
+        changed |= Checkbox("Show only misplaced", "Show only sets that have pieces in the dresser that could be stored in the armoire", c => c.ShowOnlyMisplaced, c => c.ShowOnlyMisplaced ^= true);
+
+        if (changed) {
+            C.Save();
+            CatalogService.Get().NotifyOwnershipChanged();
         }
 
-        _checkboxes.ForEach(c => c.Dispose());
-        _checkboxes.Clear();
-        _okButton?.Dispose();
-        _okButton = null;
-
-        var start = ContentStartPosition;
-        var rowWidth = ContentSize.X - 16f;
-        var x = start.X + 8f;
-        var y = start.Y + 8f;
-        const float rowHeight = 20f;
-
-        void AddCheckbox(string label, string tooltip, Func<Configuration, bool> read, Action<Configuration> flip) {
-            CheckboxNode cb = null!;
-            cb = new CheckboxNode {
-                Position = new Vector2(x, y),
-                Size = new Vector2(rowWidth, rowHeight),
-                String = label,
-                TextTooltip = tooltip,
-                IsChecked = read(C),
-                OnClick = _ => {
-                    flip(C);
-                    cb.IsChecked = read(C);
-                    C.Save();
-                    CatalogService.Get().NotifyOwnershipChanged();
-                },
-            };
-            y += rowHeight + 2f;
-            _checkboxes.Add(cb);
-            cb.AttachNode(this);
-        }
-
-        AddCheckbox(
-            "Hide completed",
-            "Hide sets where every piece is owned",
-            c => c.HideCompleted,
-            c => c.HideCompleted ^= true);
-        AddCheckbox(
-            "Hide incompatible items",
-            "Hides all sets whose items are unwearable due to race or sex restrictions",
-            c => c.HideIncompatible,
-            c => c.HideIncompatible ^= true);
-        AddCheckbox(
-            "Hide unobtainable",
-            "Hide sets that cannot currently be obtained (seasonal/old series). Completed sets still show.",
-            c => c.HideUnobtainable,
-            c => c.HideUnobtainable ^= true);
-        AddCheckbox(
-            "Hide mogstation",
-            "Hide sets and pieces that come from the mogstation",
-            c => c.HideMogstation,
-            c => c.HideMogstation ^= true);
-        AddCheckbox(
-            "Hide uncontributable",
-            "Hide sets where no piece is in your inventory to contribute to the set",
-            c => c.HideUnready,
-            c => c.HideUnready ^= true);
-        AddCheckbox(
-            "Hide shared models",
-            "Hide outfits that share the same models. Will still show any sets that are started or completed.",
-            c => c.HideSharedModels,
-            c => c.HideSharedModels ^= true);
-        AddCheckbox(
-            "Show only completed",
-            "Show only sets where every piece is owned",
-            c => c.ShowOnlyCompleted,
-            c => c.ShowOnlyCompleted ^= true);
-        AddCheckbox(
-            "Show only affordable sets",
-            "Show only sets where you can afford the currency cost of all pieces",
-            c => c.HideUnaffordable,
-            c => c.HideUnaffordable ^= true);
-        AddCheckbox(
-            "Show only tradeable",
-            "Show only sets whose pieces can be bought on the marketboard or traded",
-            c => c.HideNoMarketboard,
-            c => c.HideNoMarketboard ^= true);
-        AddCheckbox(
-            "Show only started",
-            "Show only sets that are partially completed",
-            c => c.HideNonPartials,
-            c => c.HideNonPartials ^= true);
-        AddCheckbox(
-            "Show only misplaced",
-            "Show only sets that have pieces in the dresser that could be stored in the armoire",
-            c => c.ShowOnlyMisplaced,
-            c => c.ShowOnlyMisplaced ^= true);
-
-        const float okWidth = 150f;
-        const float okHeight = 28f;
-        var bottomPad = 10f;
-        var checkboxCount = 11;
-        var checklistBottom = start.Y + 8f + checkboxCount * (rowHeight + 2f);
-        var okY = start.Y + ContentSize.Y - okHeight - bottomPad;
-        var minOkY = checklistBottom + 8f;
-        if (okY < minOkY)
-            okY = minOkY;
-
-        var okX = x + (rowWidth - okWidth) * 0.5f;
-
-        _okButton = new TextButtonNode {
-            Position = new Vector2(okX, okY),
-            Size = new Vector2(okWidth, okHeight),
-            String = Addon.GetRow(1).Text,
-            OnClick = Close,
-        };
-        _okButton.LabelNode.FontType = FontType.Axis;
-        _okButton.LabelNode.FontSize = 12;
-        _okButton.LabelNode.LineSpacing = 12;
-        _okButton.LabelNode.TextColor = ColourPalette.PrimaryWhite;
-        _okButton.AttachNode(this);
+        ImGui.Spacing();
+        if (ImGui.Button("Close", new Vector2(-1f, 0f)))
+            IsOpen = false;
     }
 
-    protected override void OnUpdate(AtkUnitBase* addon) {
-        if (_checkboxes.Count < 11) {
-            base.OnUpdate(addon);
-            return;
-        }
+    private static bool Checkbox(string label, string tooltip, Func<Configuration, bool> read, Action<Configuration> flip) {
+        var value = read(C);
+        var clicked = ImGui.Checkbox(label, ref value);
+        if (clicked)
+            flip(C);
 
-        _checkboxes[0].IsChecked = C.HideCompleted;
-        _checkboxes[1].IsChecked = C.HideIncompatible;
-        _checkboxes[2].IsChecked = C.HideUnobtainable;
-        _checkboxes[3].IsChecked = C.HideMogstation;
-        _checkboxes[4].IsChecked = C.HideUnready;
-        _checkboxes[5].IsChecked = C.HideSharedModels;
-        _checkboxes[6].IsChecked = C.ShowOnlyCompleted;
-        _checkboxes[7].IsChecked = C.HideUnaffordable;
-        _checkboxes[8].IsChecked = C.HideNoMarketboard;
-        _checkboxes[9].IsChecked = C.HideNonPartials;
-        _checkboxes[10].IsChecked = C.ShowOnlyMisplaced;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
 
-        base.OnUpdate(addon);
-    }
-
-    protected override void OnFinalize(AtkUnitBase* addon) {
-        // don't dispose nodes here
-        _checkboxes.Clear();
-        _okButton = null;
-        base.OnFinalize(addon);
+        return clicked;
     }
 }

@@ -1,9 +1,8 @@
-using FFXIVClientStructs.FFXIV.Component.GUI;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
+using Dalamud.Interface.Windowing;
 using GlamourLog.Tweaks.Cabinet;
 using GlamourLog.Tweaks.PrismBox;
-using GlamourLog.Nodes;
-using KamiToolKit.BaseTypes;
-using KamiToolKit.Nodes;
 
 namespace GlamourLog;
 
@@ -15,22 +14,9 @@ internal enum AddonFilterKind {
     Dresser,
 }
 
-internal unsafe class AddonFilterWindow : NativeAddon {
-    public const float WindowWidth = 420f;
+internal sealed class AddonFilterWindow : Window {
+    public const float WindowWidth = 380f;
 
-    private const float RowHeight = 20f;
-    private const float RowGap = 2f;
-    private const float ContentTopPad = 8f;
-    private const float OkHeight = 28f;
-    private const float OkGap = 8f;
-    private const float BottomPad = 10f;
-    // native title bar + window chrome outside content
-    private const float WindowChromeHeight = 48f;
-
-    private readonly List<(CheckboxNode Node, FilterOption Option)> _checkboxes = [];
-    private TextButtonNode? _okButton;
-    private bool _hasPendingScreenOrigin;
-    private Vector2 _pendingScreenOrigin;
     private FilterOption[] _options = [];
 
     public AddonFilterKind ActiveKind { get; private set; }
@@ -71,109 +57,53 @@ internal unsafe class AddonFilterWindow : NativeAddon {
             () => CrystallizeListHandler.Get().OnConfigChanged()),
     ];
 
-    public static float HeightFor(int optionCount)
-        => WindowChromeHeight
-           + ContentTopPad
-           + optionCount * (RowHeight + RowGap)
-           + OkGap
-           + OkHeight
-           + BottomPad;
+    public AddonFilterWindow() : base("Filters##GlamourLogAddonFilter") {
+        Size = new Vector2(WindowWidth, 0f);
+        SizeCondition = ImGuiCond.Always;
+    }
 
     public void OpenOrToggleNear(AddonFilterKind kind, string title, FilterOption[] options, Vector2 screenTopLeft) {
         if (IsOpen && ActiveKind == kind) {
-            Close();
+            IsOpen = false;
             return;
         }
 
-        if (IsOpen)
-            Close();
-
         ActiveKind = kind;
-        Title = title;
+        WindowName = $"{title}##GlamourLogAddonFilter";
         _options = options;
-        Size = new Vector2(WindowWidth, HeightFor(options.Length));
-        _pendingScreenOrigin = ClampTopLeft(screenTopLeft, Size);
-        _hasPendingScreenOrigin = true;
-        Open();
+        Position = ClampTopLeft(screenTopLeft, new Vector2(WindowWidth, 200f));
+        PositionCondition = ImGuiCond.Always;
+        IsOpen = true;
     }
 
-    public void CloseIfOpen() {
-        if (IsOpen)
-            Close();
-    }
+    public void CloseIfOpen() => IsOpen = false;
 
     public static Vector2 ClampTopLeft(Vector2 origin, Vector2 size) {
-        var screen = AtkStage.Instance()->ScreenSize;
-        var maxX = Math.Max(0f, screen.Width - size.X);
-        var maxY = Math.Max(0f, screen.Height - size.Y);
+        var screen = ImGuiHelpers.MainViewport.Size;
+        var maxX = Math.Max(0f, screen.X - size.X);
+        var maxY = Math.Max(0f, screen.Y - size.Y);
         return new Vector2(Math.Clamp(origin.X, 0f, maxX), Math.Clamp(origin.Y, 0f, maxY));
     }
 
-    protected override void OnSetup(AtkUnitBase* addon, Span<AtkValue> atkValueSpan) {
-        SetWindowSize(Size);
-
-        if (_hasPendingScreenOrigin) {
-            SetWindowPosition(_pendingScreenOrigin);
-            _hasPendingScreenOrigin = false;
-        }
-
-        foreach (var (node, _) in _checkboxes)
-            node.Dispose();
-        _checkboxes.Clear();
-        _okButton?.Dispose();
-        _okButton = null;
-
-        var start = ContentStartPosition;
-        var rowWidth = ContentSize.X - 16f;
-        var x = start.X + 8f;
-        var y = start.Y + ContentTopPad;
+    public override void Draw() {
+        PositionCondition = ImGuiCond.FirstUseEver;
 
         foreach (var option in _options) {
-            CheckboxNode cb = null!;
-            cb = new CheckboxNode {
-                Position = new Vector2(x, y),
-                Size = new Vector2(rowWidth, RowHeight),
-                String = option.Label,
-                TextTooltip = option.Tooltip,
-                IsChecked = option.Read(C),
-                OnClick = _ => {
-                    option.Flip(C);
-                    cb.IsChecked = option.Read(C);
-                    C.Save();
-                    option.OnChanged?.Invoke();
-                },
-            };
-            y += RowHeight + RowGap;
-            _checkboxes.Add((cb, option));
-            cb.AttachNode(this);
+            var value = option.Read(C);
+            if (ImGui.Checkbox(option.Label, ref value)) {
+                option.Flip(C);
+                C.Save();
+                option.OnChanged?.Invoke();
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(option.Tooltip);
         }
 
-        const float okWidth = 150f;
-        var okY = Math.Max(y + OkGap, start.Y + ContentSize.Y - OkHeight - BottomPad);
-        _okButton = new TextButtonNode {
-            Position = new Vector2(x + (rowWidth - okWidth) * 0.5f, okY),
-            Size = new Vector2(okWidth, OkHeight),
-            String = Addon.GetRow(1).Text,
-            OnClick = Close,
-        };
-        _okButton.LabelNode.FontType = FontType.Axis;
-        _okButton.LabelNode.FontSize = 12;
-        _okButton.LabelNode.LineSpacing = 12;
-        _okButton.LabelNode.TextColor = ColourPalette.PrimaryWhite;
-        _okButton.AttachNode(this);
+        ImGui.Spacing();
+        if (ImGui.Button("Close", new Vector2(-1f, 0f)))
+            IsOpen = false;
     }
 
-    protected override void OnUpdate(AtkUnitBase* addon) {
-        foreach (var (node, option) in _checkboxes)
-            node.IsChecked = option.Read(C);
-
-        base.OnUpdate(addon);
-    }
-
-    protected override void OnFinalize(AtkUnitBase* addon) {
-        _checkboxes.Clear();
-        _okButton = null;
-        ActiveKind = AddonFilterKind.None;
-        base.OnFinalize(addon);
-    }
+    public override void OnClose() => ActiveKind = AddonFilterKind.None;
 }
