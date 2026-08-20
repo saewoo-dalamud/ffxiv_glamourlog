@@ -44,6 +44,10 @@ git checkout -b main
 ## 릴리즈
 - 릴리즈 생성 전: changelog 내용 사용자에게 확인. 확인 없이 자동 생성 문구로 진행 금지.
 - 확인 절차: 커밋 로그 기반 변경 요약을 사용자에게 제시 → 사용자 승인/수정 → 확정된 내용으로 릴리즈 생성.
+- `.github/workflows/release.yml`: 소스는 `saewoo-dalamud/.github` (동기화 대상, 저장소별 수정 금지).
+- 워크플로 실행 시 `changelog` input에 확인된 텍스트 입력. 생성되는 릴리즈 노트 = `changelog` input + upstream 기준 버전 + GitHub 자동 생성 전체 변경목록(항상 포함).
+- 저장소별 필수 repo variable: `PROJECT_NAME` = 프로젝트 폴더명(= csproj 파일명, `<프로젝트폴더>/<프로젝트폴더>.csproj` 구조 전제).
+- 저장소별 필수 파일: `UPSTREAM_VERSION` (없으면 릴리즈 노트 생성 단계 실패).
 
 ## MyDalamudPlugins 등록
 `plugins.json` 추가 항목:

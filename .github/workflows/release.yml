@@ -2,12 +2,19 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      changelog:
+        description: "패치 내역 (한글로 작성, 인스톨러에 표시됨)"
+        required: true
+        type: string
 
 jobs:
   release:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,18 +37,19 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          [xml]$csproj = Get-Content GlamourLog/GlamourLog.csproj
+          [xml]$csproj = Get-Content "$env:PROJECT_NAME/$env:PROJECT_NAME.csproj"
           $version = ($csproj.Project.PropertyGroup.Version | Where-Object { $_ }) | Select-Object -First 1
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Build
-        run: dotnet build GlamourLog/GlamourLog.csproj -c Release
+        shell: pwsh
+        run: dotnet build "$env:PROJECT_NAME/$env:PROJECT_NAME.csproj" -c Release
 
       - name: Locate package
         id: package
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path GlamourLog/bin/Release -Filter *.zip -Recurse | Select-Object -First 1
+          $zip = Get-ChildItem -Path "$env:PROJECT_NAME/bin/Release" -Filter *.zip -Recurse | Select-Object -First 1
           if (-not $zip) { throw "No package zip produced by DalamudPackager - check build output" }
           Copy-Item $zip.FullName latest.zip
 
@@ -50,9 +58,11 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG_INPUT: ${{ inputs.changelog }}
         run: |
+          $upstreamVersion = (Get-Content UPSTREAM_VERSION -Raw).Trim()
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" -f "tag_name=${{ steps.version.outputs.version }}" --jq .body
-          $notes = "Fork of https://github.com/Jaksuhn/ffxiv_glamourlog.`n`n$generated"
+          $notes = "$env:CHANGELOG_INPUT`n`n---`n`nBased on upstream version $upstreamVersion.`n`n$generated"
           $notes | Out-File -FilePath notes.md -Encoding utf8
 
       - name: Create GitHub release
