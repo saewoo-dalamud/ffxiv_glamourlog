@@ -65,12 +65,12 @@ internal sealed class ExtraAddonButtons : IPluginService, IAsyncDisposable {
     }
 
     private static void StoreAllArmoire() {
-        if (AtkUnitBase.IsAddonReady("Cabinet"))
+        if (NativeAddon.IsReady("Cabinet"))
             Svc.Automation.Start(new StoreAllArmoireTask());
     }
 
     private static void StoreAllDresser() {
-        if (AtkUnitBase.IsAddonReady(CrystallizeNativeTree.AddonName))
+        if (NativeAddon.IsReady(CrystallizeNativeTree.AddonName))
             Svc.Automation.Start(new StoreAllDresserTask());
     }
 

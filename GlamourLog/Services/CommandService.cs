@@ -17,9 +17,9 @@ internal sealed class CommandService : IPluginCommands {
             .Default(WindowsService.Get().ToggleMainWindow)
             .Sub("stop", "Cancel any running tasks", Svc.Automation.Stop)
             .Sub("store", "Store all eligible items in your armoire/dresser", () => {
-                if (AtkUnitBase.IsAddonReady("Cabinet"))
+                if (NativeAddon.IsReady("Cabinet"))
                     Svc.Automation.Start(new StoreAllArmoireTask());
-                if (AtkUnitBase.IsAddonReady("MiragePrismPrismBoxCrystallize"))
+                if (NativeAddon.IsReady("MiragePrismPrismBoxCrystallize"))
                     Svc.Automation.Start(new StoreAllDresserTask());
             });
 }

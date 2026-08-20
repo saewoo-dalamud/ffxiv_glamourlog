@@ -210,7 +210,7 @@ internal sealed class StoreAllDresserTask : TaskBase {
     }
 
     private static unsafe bool IsPrismBoxReady()
-        => AtkUnitBase.IsAddonReady(Crystallize) && AtkUnitBase.IsAddonReady(PrismBox) && MirageManager.Instance()->PrismBoxLoaded;
+        => NativeAddon.IsReady(Crystallize) && NativeAddon.IsReady(PrismBox) && MirageManager.Instance()->PrismBoxLoaded;
 
     private static unsafe bool IsSentSlotConsumed(PrismBoxCrystallizeItem row) {
         if (row.Inventory == InventoryType.Invalid)

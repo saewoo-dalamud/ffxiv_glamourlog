@@ -83,8 +83,8 @@ internal sealed class IpcProvider : IPluginService, IDisposable {
 
     // same checks I do in the tasks
     private unsafe bool IsReadyToStore() {
-        if (AtkUnitBase.IsAddonReady("Cabinet") && UIState.Instance()->Cabinet.IsCabinetLoaded()) return true;
-        if (AtkUnitBase.IsAddonReady("MiragePrismPrismBox") && AtkUnitBase.IsAddonReady("MiragePrismPrismBoxCrystallize") && MirageManager.Instance() is not null and var mm && mm->PrismBoxLoaded) return true;
+        if (NativeAddon.IsReady("Cabinet") && UIState.Instance()->Cabinet.IsCabinetLoaded()) return true;
+        if (NativeAddon.IsReady("MiragePrismPrismBox") && NativeAddon.IsReady("MiragePrismPrismBoxCrystallize") && MirageManager.Instance() is not null and var mm && mm->PrismBoxLoaded) return true;
         return false;
     }
 }

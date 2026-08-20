@@ -2,6 +2,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using GlamourLog.Services;
 using System.Threading.Tasks;
 using CabinetSheet = Lumina.Excel.Sheets.Cabinet;
 
@@ -14,7 +15,7 @@ internal sealed class StoreAllArmoireTask : AutoTask {
 
     protected override async Task Execute() {
         using var scope = BeginScope(nameof(StoreAllArmoireTask));
-        ErrorIf(!AtkUnitBase.IsAddonReady(AddonName) || !IsCabinetLoaded(), "Cabinet not ready");
+        ErrorIf(!NativeAddon.IsReady(AddonName) || !IsCabinetLoaded(), "Cabinet not ready");
         for (var categoryIndex = 0; categoryIndex < CategoryCount; categoryIndex++) {
             await SelectCategory(categoryIndex);
             await StoreAllInCurrentCategory();
