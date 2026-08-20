@@ -1,7 +1,5 @@
 using AllaganLib.GameSheets.ItemSources;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
-using GlamourLog.Nodes;
-using KamiToolKit.Nodes;
 using LuminaSupplemental.Excel.Model;
 using LuminaSupplemental.Excel.Services;
 
@@ -116,17 +114,6 @@ internal sealed class DungeonChestLayout {
 
     internal List<uint> OrderChestRowIdsForCfc(uint cfcId)
         => OrderChestRowIds(_byRowId.Values.Where(c => c.CfcId == cfcId).Select(c => c.RowId));
-
-    internal float ComputeMaxLabelColumnWidth(TextNode measure, IReadOnlyList<uint> chestOrder, string? extraPrimaryLabel = null) {
-        var max = extraPrimaryLabel is { Length: > 0 } ? DetailListItemNode.MeasureDutyChestLabelColumnWidth(measure, extraPrimaryLabel, string.Empty) : 0f;
-        for (var i = 0; i < chestOrder.Count; i++) {
-            var width = DetailListItemNode.MeasureDutyChestLabelColumnWidth(measure, $"Chest {i + 1}", FormatSecondaryLabel(chestOrder[i]));
-            if (width > max)
-                max = width;
-        }
-
-        return max;
-    }
 
     internal string FormatSecondaryLabel(uint chestRowId)
         => _byRowId.TryGetValue(chestRowId, out var chest) ? chest.SecondaryLabel : string.Empty;

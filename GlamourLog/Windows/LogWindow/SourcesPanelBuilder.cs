@@ -4,17 +4,12 @@ using AllaganLib.GameSheets.ItemSources;
 using AllaganLib.GameSheets.Model;
 using AllaganLib.GameSheets.Sheets;
 using AllaganLib.GameSheets.Sheets.Rows;
-using GlamourLog.Nodes;
 using GlamourLog.Services;
-using KamiToolKit.Classes;
-using KamiToolKit.Nodes;
 using Lumina.Excel;
 
 namespace GlamourLog.Windows.LogWindow;
 
 internal static class SourcesPanelBuilder {
-    private const int MaxSourceIconsVisible = 10;
-
     private static DutyBuckets GetDutyBucket(Dictionary<uint, DutyBuckets> duties, uint cfcId) {
         if (!duties.TryGetValue(cfcId, out var b)) {
             b = new DutyBuckets();
@@ -45,8 +40,8 @@ internal static class SourcesPanelBuilder {
         ItemInfoType.Oizys,
     ];
 
-    internal static List<TreeListSection<DetailListRowData>> BuildSourceSections(CatalogService catalog, GlamourSet set, uint? pieceFilter, TextNode dutyChestMeasure) {
-        var sections = new List<TreeListSection<DetailListRowData>>();
+    internal static List<DetailSection> BuildSourceSections(CatalogService catalog, GlamourSet set, uint? pieceFilter) {
+        var sections = new List<DetailSection>();
         var scopeList = catalog.GetSourceScopeItemIds(set, pieceFilter);
         var scope = scopeList.ToHashSet();
         if (scope.Count == 0)
@@ -62,7 +57,7 @@ internal static class SourcesPanelBuilder {
 
         var dutyChestRowIdsOrderedByCfc = DungeonChestLayout.Instance.BuildDutyChests(catalog, set);
 
-        TryAddSection(sections, BuildDutiesSection(sourcesByPiece, scope, dutyChestRowIdsOrderedByCfc, dutyChestMeasure));
+        TryAddSection(sections, BuildDutiesSection(sourcesByPiece, scope, dutyChestRowIdsOrderedByCfc));
         TryAddSection(sections, BuildFatesSection(sourcesByPiece, scope));
         TryAddSection(sections, BuildLootboxSection(sourcesByPiece, scope));
         TryAddSection(sections, BuildCraftSection(sourcesByPiece, scope));
@@ -71,12 +66,12 @@ internal static class SourcesPanelBuilder {
         return sections;
     }
 
-    private static void TryAddSection(List<TreeListSection<DetailListRowData>> sections, TreeListSection<DetailListRowData>? section) {
+    private static void TryAddSection(List<DetailSection> sections, DetailSection? section) {
         if (section is not null)
             sections.Add(section);
     }
 
-    private static TreeListSection<DetailListRowData>? BuildDutiesSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope, Dictionary<uint, List<uint>> dutyChestRowIdsOrderedByCfc, TextNode dutyChestMeasure) {
+    private static DetailSection? BuildDutiesSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope, Dictionary<uint, List<uint>> dutyChestRowIdsOrderedByCfc) {
         var duties = new Dictionary<uint, DutyBuckets>();
         foreach (var (pieceId, list) in sourcesByPiece) {
             foreach (var src in list) {
@@ -123,11 +118,9 @@ internal static class SourcesPanelBuilder {
             var hasGeneral = b.General.Count > 0;
             var hasChests = chestKeysThisDuty.Count > 0;
 
-            var maxDutyChestLabelWidth = chestIndex.ComputeMaxLabelColumnWidth(dutyChestMeasure, fullChestOrder, extraPrimaryLabel: hasGeneral && hasChests ? "General" : null);
-
             if (hasGeneral) {
                 if (hasChests)
-                    AppendIconStripRow(entries, "General", string.Empty, b.General, scope, iconOnly: false, sourceChestLabelColumnWidth: maxDutyChestLabelWidth);
+                    AppendIconStripRow(entries, "General", string.Empty, b.General, scope, iconOnly: false);
                 else
                     AppendIconStripRow(entries, string.Empty, b.General, scope, iconOnly: true);
             }
@@ -142,12 +135,11 @@ internal static class SourcesPanelBuilder {
                     b.Chests[ck],
                     scope,
                     iconOnly: false,
-                    sourceChestLabelColumnWidth: maxDutyChestLabelWidth,
                     dungeonChestRowId: hasChest && chest.HasMapMarker ? ck : 0);
             }
         }
 
-        return entries.Count == 0 ? null : new TreeListSection<DetailListRowData> {
+        return entries.Count == 0 ? null : new DetailSection {
             Header = "Duties",
             Entries = entries,
         };
@@ -161,7 +153,7 @@ internal static class SourcesPanelBuilder {
         internal Dictionary<uint, HashSet<uint>> Chests { get; } = [];
     }
 
-    private static TreeListSection<DetailListRowData>? BuildFatesSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
+    private static DetailSection? BuildFatesSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
         var fateItems = new Dictionary<uint, HashSet<uint>>();
         foreach (var (pieceId, list) in sourcesByPiece) {
             foreach (var src in list) {
@@ -191,7 +183,7 @@ internal static class SourcesPanelBuilder {
             AppendIconStripRow(entries, string.Empty, setItems, scope, iconOnly: true);
         }
 
-        return entries.Count == 0 ? null : new TreeListSection<DetailListRowData> {
+        return entries.Count == 0 ? null : new DetailSection {
             Header = "FATEs",
             Entries = entries,
         };
@@ -250,7 +242,7 @@ internal static class SourcesPanelBuilder {
     }
 
     // lootboxes / field-op coffers that aren't normal duty chest drops
-    private static TreeListSection<DetailListRowData>? BuildLootboxSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
+    private static DetailSection? BuildLootboxSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
         var supplement = new Dictionary<ItemInfoType, Dictionary<uint, HashSet<uint>>>();
         var fieldOps = new Dictionary<(ItemInfoType Type, uint CofferKind), HashSet<uint>>();
         foreach (var (pieceId, list) in sourcesByPiece) {
@@ -305,13 +297,13 @@ internal static class SourcesPanelBuilder {
             AppendIconStripRow(entries, string.Empty, pieceSet, scope, iconOnly: true);
         }
 
-        return new TreeListSection<DetailListRowData> {
+        return new DetailSection {
             Header = "Lootboxes",
             Entries = entries,
         };
     }
 
-    private static TreeListSection<DetailListRowData>? BuildCraftSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
+    private static DetailSection? BuildCraftSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
         var byRecipe = new Dictionary<uint, CraftAgg>();
         foreach (var (pieceId, list) in sourcesByPiece) {
             foreach (var src in list) {
@@ -347,10 +339,10 @@ internal static class SourcesPanelBuilder {
 
             var ingOrdered = ingIds.Distinct().OrderBy(id => Item.GetRow(id).Name.ToString(), StringComparer.Ordinal).ToList();
             if (ingOrdered.Count > 0)
-                AppendIconStripRow(entries, string.Empty, ingOrdered, scope, iconOnly: true, presentation: SourceIconPresentation.Large);
+                AppendIconStripRow(entries, string.Empty, ingOrdered, scope, iconOnly: true);
         }
 
-        return new TreeListSection<DetailListRowData> {
+        return new DetailSection {
             Header = "Crafting",
             Entries = entries,
         };
@@ -361,7 +353,7 @@ internal static class SourcesPanelBuilder {
         internal uint ResultItemId { get; init; }
     }
 
-    private static TreeListSection<DetailListRowData>? BuildDesynthesisSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
+    private static DetailSection? BuildDesynthesisSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
         var byCost = new Dictionary<uint, HashSet<uint>>();
         foreach (var (pieceId, list) in sourcesByPiece) {
             foreach (var src in list) {
@@ -387,13 +379,13 @@ internal static class SourcesPanelBuilder {
             AppendArrowFlowRow(entries, [costId], pieces);
         }
 
-        return new TreeListSection<DetailListRowData> {
+        return new DetailSection {
             Header = "Desynthesis",
             Entries = entries,
         };
     }
 
-    private static TreeListSection<DetailListRowData>? BuildQuestsSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
+    private static DetailSection? BuildQuestsSection(Dictionary<uint, List<ItemSource>> sourcesByPiece, HashSet<uint> scope) {
         var byQuest = new Dictionary<uint, QuestAgg>();
         foreach (var (pieceId, list) in sourcesByPiece) {
             foreach (var src in list) {
@@ -430,7 +422,7 @@ internal static class SourcesPanelBuilder {
             AppendIconStripRow(entries, string.Empty, agg.Pieces, scope, iconOnly: true);
         }
 
-        return new TreeListSection<DetailListRowData> {
+        return new DetailSection {
             Header = "Quests",
             Entries = entries,
         };
@@ -453,45 +445,36 @@ internal static class SourcesPanelBuilder {
         return enpcRow is null ? null : TryNavigateTargetFromNpc(enpcRow);
     }
 
-    private static void AppendIconStripRow(List<DetailListRowData> rows, string label, string secondaryLabel, IEnumerable<uint> itemIds, HashSet<uint> scope, bool iconOnly = false, SourceIconPresentation presentation = SourceIconPresentation.Normal, float sourceChestLabelColumnWidth = 0f, uint dungeonChestRowId = 0) {
+    private static void AppendIconStripRow(List<DetailListRowData> rows, string label, string secondaryLabel, IEnumerable<uint> itemIds, HashSet<uint> scope, bool iconOnly = false, uint dungeonChestRowId = 0) {
         var ordered = itemIds.Where(id => id != 0).Distinct().OrderBy(id => Item.GetRow(id).Name.ToString(), StringComparer.Ordinal).ToList();
         if (ordered.Count == 0)
             return;
-        var overflow = Math.Max(0, ordered.Count - MaxSourceIconsVisible);
-        var visible = ordered.Count <= MaxSourceIconsVisible ? ordered : [.. ordered.Take(MaxSourceIconsVisible)];
 
         rows.Add(new DetailListRowData {
             Kind = DetailRowKind.SourceChest,
             PrimaryText = label,
             SecondaryText = secondaryLabel,
-            SourceItemIds = visible,
-            SourceIconsOnly = iconOnly || string.IsNullOrEmpty(label),
-            SourceIconOverflow = overflow,
-            SourcePresentation = presentation,
-            SourceChestLabelColumnWidth = sourceChestLabelColumnWidth,
+            SourceItemIds = ordered,
             DungeonChestRowId = dungeonChestRowId,
         });
     }
 
-    private static void AppendIconStripRow(List<DetailListRowData> rows, string label, IEnumerable<uint> itemIds, HashSet<uint> scope, bool iconOnly = false, SourceIconPresentation presentation = SourceIconPresentation.Normal)
-        => AppendIconStripRow(rows, label, string.Empty, itemIds, scope, iconOnly, presentation);
+    private static void AppendIconStripRow(List<DetailListRowData> rows, string label, IEnumerable<uint> itemIds, HashSet<uint> scope, bool iconOnly = false)
+        => AppendIconStripRow(rows, label, string.Empty, itemIds, scope, iconOnly);
 
-    private static void AppendIconStripRow(List<DetailListRowData> rows, string label, HashSet<uint> itemIds, HashSet<uint> scope, bool iconOnly = false, SourceIconPresentation presentation = SourceIconPresentation.Normal)
-        => AppendIconStripRow(rows, label, string.Empty, itemIds, scope, iconOnly, presentation);
+    private static void AppendIconStripRow(List<DetailListRowData> rows, string label, HashSet<uint> itemIds, HashSet<uint> scope, bool iconOnly = false)
+        => AppendIconStripRow(rows, label, string.Empty, itemIds, scope, iconOnly);
 
-    // one-line "left -> right" icon row (desynth / lootbox key -> what you get)
+    // one-line "left -> right" row (desynth / lootbox key -> what you get)
     private static void AppendArrowFlowRow(List<DetailListRowData> rows, IReadOnlyList<uint> leftIds, IEnumerable<uint> rightIds) {
         var leftOrdered = leftIds.Where(id => id != 0).Distinct().OrderBy(id => Item.GetRow(id).Name.ToString(), StringComparer.Ordinal).ToList();
         var rightOrdered = rightIds.Where(id => id != 0).Distinct().OrderBy(id => Item.GetRow(id).Name.ToString(), StringComparer.Ordinal).ToList();
         if (leftOrdered.Count == 0 && rightOrdered.Count == 0)
             return;
-        var overflow = Math.Max(0, rightOrdered.Count - MaxSourceIconsVisible);
-        var rightVisible = rightOrdered.Count <= MaxSourceIconsVisible ? rightOrdered : [.. rightOrdered.Take(MaxSourceIconsVisible)];
         rows.Add(new DetailListRowData {
             Kind = DetailRowKind.SourceArrowFlow,
             SourceFlowLeftIds = leftOrdered,
-            SourceItemIds = rightVisible,
-            SourceIconOverflow = overflow,
+            SourceItemIds = rightOrdered,
         });
     }
 

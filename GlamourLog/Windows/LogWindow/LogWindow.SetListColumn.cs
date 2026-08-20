@@ -1,173 +1,153 @@
 using System.ComponentModel;
-using FFXIVClientStructs.FFXIV.Client.UI.Misc;
-using GlamourLog.Nodes;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
+using Dalamud.Interface.Components;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using GlamourLog.Services;
 using GlamourLog.Windows.LogWindow;
 
 namespace GlamourLog;
 
-internal unsafe partial class LogWindow {
-    private void RefreshRows(OwnershipQuery q, bool refreshCategoryCounts) {
-        if (SetList is null || _statsSetsLine is null || _statsSpaceLine is null)
-            return;
+internal partial class LogWindow {
+    private List<SetListRowData> _setListOptions = [];
+    private GlamourSet? _setContextMenuTarget;
 
-        if (ItemFinderModule.Instance() is null) {
-            _statsSetsLine.String = "\u2014 / \u2014";
-            _statsSpaceLine.String = string.Empty;
-            return;
-        }
-
-        if (refreshCategoryCounts)
-            RefreshCategoryCounts(q);
-
-        RepopulateSetListFromFilteredRows(q);
-    }
-
-    private void RefreshCategoryCounts(OwnershipQuery q) {
-        if (_statsSetsLine is null || _statsSpaceLine is null)
-            return;
-
-        if (ItemFinderModule.Instance() is null) {
-            _statsSetsLine.String = "\u2014 / \u2014";
-            _statsSpaceLine.String = string.Empty;
-            return;
-        }
-
-        var mirageCatalogSets = CatalogService.Get().GlamourSets.Where(s => !s.NonSetCabinetPiece).ToList();
-        var counts = q.CountCompletions(mirageCatalogSets);
-        _statsSetsLine.String = $"{counts.OwnedObtainable} / {counts.TotalObtainable}";
-        // dresser space saved still includes every complete outfit (obtainable or not)
-        _statsSpaceLine.String = $"{mirageCatalogSets.Where(s => q.For(s).IsComplete).Sum(x => x.Items.Count - 1)}";
-        _categoryColumn?.UpdateButtonStates(_selectedCategoryId, CategoryRows, q, refreshCounts: true);
-    }
-
-    private void RebuildSetListOrderOnly() {
-        if (SetList is null)
-            return;
-        if (ItemFinderModule.Instance() is null)
-            return;
-
-        RepopulateSetListFromFilteredRows(OwnershipService.Get().Query());
-    }
-
-    private void RepopulateSetListFromFilteredRows(OwnershipQuery q) {
-        if (SetList is null)
-            return;
-
+    private void RepopulateSetListFromFilteredRows() {
+        var q = OwnershipService.Get().Query();
         var categoryRows = CategoryRows(_selectedCategoryId);
         SyncCurrencyFilterOptions();
 
-        var searchRaw = _categoryColumn?.Search.Input.String.ToString() ?? string.Empty;
-        var searchTrimmed = string.IsNullOrWhiteSpace(searchRaw) ? string.Empty : searchRaw.Trim();
+        var searchTrimmed = string.IsNullOrWhiteSpace(_searchText) ? string.Empty : _searchText.Trim();
         var rows = SetListFilterSort.Apply(searchTrimmed, categoryRows, q, _currencyFilterItemId);
 
-        _setListOptions.Clear();
-        foreach (var set in rows) {
-            try {
-                _setListOptions.Add(BuildSetListRowData(set, q));
-            }
-            catch (Exception ex) {
-                Svc.Log.Error(ex, $"[{nameof(LogWindow)}] Build virtual set row failed");
-            }
-        }
-
-        SetList.OptionsList = [.. _setListOptions];
-        if (_pendingClearSetSelection) {
-            _pendingClearSetSelection = false;
-            SetList.ClearSelection();
-        }
-        else {
-            SyncSetListSelectionHighlight(); // OptionsList replaces row refs, gotta rebind SelectedItems so the highlight matches _selectedSet
-        }
-
-        if (_pendingResetSetScroll) {
-            _pendingResetSetScroll = false;
-            SetList.ResetScroll();
-        }
-
-        if (_pendingSelectSet is { } pendingSet) {
-            _pendingSelectSet = null;
-            ScrollSetListToSet(pendingSet);
-        }
+        _setListOptions = [.. rows.Select(set => BuildSetListRowData(set, q))];
     }
 
     private void SyncCurrencyFilterOptions() {
-        if (_setListColumn is null)
-            return;
-
         var catalog = CatalogService.Get();
-        var currencies = catalog.GetCurrencyFilterItemIds(_selectedCategoryId == AllCategoryId ? null : _selectedCategoryId);
-        if (_currencyFilterItemId != SetListCurrencyFilterNode.NoneCurrencyId && !currencies.Contains(_currencyFilterItemId))
-            _currencyFilterItemId = SetListCurrencyFilterNode.NoneCurrencyId;
+        _currencyFilterOptions = [.. catalog.GetCurrencyFilterItemIds(_selectedCategoryId == AllCategoryId ? null : _selectedCategoryId)];
+        if (_currencyFilterItemId != 0 && !_currencyFilterOptions.Contains(_currencyFilterItemId))
+            _currencyFilterItemId = 0;
+    }
 
-        var dropDown = _setListColumn.CurrencyFilter.DropDown;
-        var expectedOptionCount = currencies.Count + 1;
-        if (_lastCurrencyFilterOptions is not null
-            && _lastCurrencyFilterOptions.Count == currencies.Count
-            && _lastCurrencyFilterOptions.SequenceEqual(currencies)
-            && dropDown.SelectedOption == _currencyFilterItemId
-            && dropDown.Options.Count == expectedOptionCount) // must match count too, because the dropdown rebuilds its options on open and may have only "All" if the category changed
+    private void DrawSetListColumn() {
+        DrawSetListToolbar();
+        ImGui.Separator();
+
+        if (ImGui.BeginChild("##LogSetListRows")) {
+            foreach (var row in _setListOptions)
+                DrawSetListRow(row);
+        }
+        ImGui.EndChild();
+
+        DrawSetContextMenuPopup();
+    }
+
+    private void DrawSetListToolbar() {
+        ImGui.SetNextItemWidth(140f);
+        var currentLabel = _currencyFilterItemId == 0 ? "All currencies" : Item.GetRow(_currencyFilterItemId).Name.ToString();
+        if (ImGui.BeginCombo("##LogCurrencyFilter", currentLabel)) {
+            if (ImGui.Selectable("All currencies", _currencyFilterItemId == 0))
+                OnCurrencyFilterSelected(0);
+            foreach (var currencyId in _currencyFilterOptions) {
+                if (ImGui.Selectable(Item.GetRow(currencyId).Name.ToString(), _currencyFilterItemId == currencyId))
+                    OnCurrencyFilterSelected(currencyId);
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.BeginCombo("##LogSortMode", SortModeLabel(C.SetListSortMode))) {
+            foreach (var mode in Enum.GetValues<GlamourSetSortMode>()) {
+                if (ImGui.Selectable(SortModeLabel(mode), mode == C.SetListSortMode))
+                    OnSetListSortModeSelected(mode);
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine();
+        var directionIcon = C.SetListSortDirection == ListSortDirection.Ascending ? FontAwesomeIcon.SortAmountUp : FontAwesomeIcon.SortAmountDown;
+        if (ImGuiComponents.IconButton(directionIcon))
+            OnSetListSortDirectionToggle();
+
+        ImGui.SameLine();
+        var filterActive = _filterWindow.IsOpen;
+        if (filterActive)
+            ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive]);
+        if (ImGuiComponents.IconButton(FontAwesomeIcon.Filter))
+            _filterWindow.OpenOrToggleNear(ComputeFilterWindowScreenOrigin());
+        if (filterActive)
+            ImGui.PopStyleColor();
+    }
+
+    private void DrawSetListRow(SetListRowData row) {
+        var label = $"{row.Title}##set{row.Set.ItemId}_{row.IconItemId}";
+        var selected = ReferenceEquals(_selectedSet, row.Set);
+        if (ImGui.Selectable(label, selected)) {
+            _selectedSet = row.Set;
+            _selectedSourcePieceItemId = null;
+            RefreshDetails();
+        }
+
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) {
+            _setContextMenuTarget = row.Set;
+            ImGui.OpenPopup("##LogSetContextMenu");
+        }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled(RowStatusTag(row));
+
+        ImGui.TextDisabled($"    {row.Subtitle}");
+    }
+
+    private static string SortModeLabel(GlamourSetSortMode mode) => mode switch {
+        GlamourSetSortMode.Alphabetical => "Alphabetical",
+        GlamourSetSortMode.ItemLevel => "Item level",
+        GlamourSetSortMode.Patch => "Patch",
+        _ => mode.ToString(),
+    };
+
+    private static string RowStatusTag(SetListRowData row) {
+        var tags = new List<string>();
+        if (row.IsOwned)
+            tags.Add("Owned");
+        if (row.ShowStorage)
+            tags.Add(row.StorageKind switch {
+                StorageKind.Armoire or StorageKind.ArmoireFaded => "Armoire",
+                _ => "Dresser",
+            });
+        if (row.ShowArmoireWarning)
+            tags.Add("Misplaced");
+        if (row.IsUnobtainable)
+            tags.Add("Unobtainable");
+        if (row.IsMogstation)
+            tags.Add("Mogstation");
+        return tags.Count == 0 ? string.Empty : $"[{string.Join(", ", tags)}]";
+    }
+
+    private unsafe void DrawSetContextMenuPopup() {
+        if (!ImGui.BeginPopup("##LogSetContextMenu"))
             return;
 
-        _lastCurrencyFilterOptions = currencies;
-        _setListColumn.CurrencyFilter.SyncOptions(currencies, _currencyFilterItemId);
+        if (_setContextMenuTarget is { } set && ImGui.Selectable("Try on (glamour plate)"))
+            AgentTryon.Instance()->TryOnSilent(set.Items.ToArray());
+
+        ImGui.EndPopup();
     }
 
     private void OnCurrencyFilterSelected(uint currencyItemId) {
         if (_currencyFilterItemId == currencyItemId)
             return;
         _currencyFilterItemId = currencyItemId;
-        _pendingResetSetScroll = true;
-        QueueSetListRefresh();
-    }
-
-    private void SyncSetListSelectionHighlight() {
-        if (SetList is null)
-            return;
-
-        SetList.SelectedItems.Clear();
-        if (_selectedSet is not { } selected)
-            return;
-
-        if (SetList.OptionsList.Find(r => ReferenceEquals(r.Set, selected)) is not null and var row)
-            SetList.SelectedItems.Add(row);
-    }
-
-    private void ScrollSetListToSet(GlamourSet set) {
-        if (SetList is null)
-            return;
-
-        var index = SetList.OptionsList.FindIndex(r => r.Set.ItemId == set.ItemId);
-        if (index < 0)
-            return;
-
-        var stride = (int)(GlamourSetListItemNode.ItemHeight + SetList.ItemSpacing);
-        if (stride < 1)
-            return;
-
-        var nodeCount = Math.Max(1, (int)(SetList.Height / stride));
-        var maxScroll = Math.Max(0, SetList.OptionsList.Count - nodeCount);
-        var scroll = Math.Clamp(index, 0, maxScroll);
-
-        SetList.ScrollBarNode.OnValueChanged?.Invoke(scroll * stride);
-    }
-
-    private void ClearSetSearchIfActive() {
-        if (_categoryColumn is null)
-            return;
-        var current = _categoryColumn.Search.Input.String.ToString();
-        if (string.IsNullOrWhiteSpace(current))
-            return;
-        _categoryColumn.Search.Input.String = string.Empty;
-        _persistedSearch = string.Empty;
+        _dirty = true;
     }
 
     private SetListRowData BuildSetListRowData(GlamourSet set, OwnershipQuery q, bool appendNotInListSuffix = false) {
         var status = q.For(set);
         var subtitle = SetSublineText(status);
         if (appendNotInListSuffix) {
-            var searchRaw = _categoryColumn?.Search.Input.String.ToString() ?? string.Empty;
-            var searchTrimmed = string.IsNullOrWhiteSpace(searchRaw) ? string.Empty : searchRaw.Trim();
+            var searchTrimmed = string.IsNullOrWhiteSpace(_searchText) ? string.Empty : _searchText.Trim();
             if (C.HideSharedModels && !SetListFilterSort.IsVisibleInSetList(set, searchTrimmed, CategoryRows(_selectedCategoryId), q, _currencyFilterItemId))
                 subtitle += " · Not in list";
         }
@@ -181,7 +161,7 @@ internal unsafe partial class LogWindow {
             IsMogstation = set.IsMogstation,
             ShowStorage = status.Storage is SetStorageState.Dresser or SetStorageState.Armoire,
             ShowArmoireWarning = status.ArmoireMisplaced,
-            StorageIconPart = status.Storage == SetStorageState.Armoire ? GlamourIconNode.IconPart.Armoire : GlamourIconNode.IconPart.Dresser,
+            StorageKind = status.Storage == SetStorageState.Armoire ? StorageKind.Armoire : StorageKind.Dresser,
         };
     }
 
@@ -219,11 +199,11 @@ internal unsafe partial class LogWindow {
             _ => ItemStorageState.None,
         };
 
-        var iconPart = storageState switch {
-            ItemStorageState.Armoire => GlamourIconNode.IconPart.Armoire,
-            ItemStorageState.DresserLoose => GlamourIconNode.IconPart.DresserFaded,
-            ItemStorageState.DresserSet => GlamourIconNode.IconPart.Dresser,
-            _ => GlamourIconNode.IconPart.Dresser,
+        var storageKind = storageState switch {
+            ItemStorageState.Armoire => StorageKind.Armoire,
+            ItemStorageState.DresserLoose => StorageKind.DresserFaded,
+            ItemStorageState.DresserSet => StorageKind.Dresser,
+            _ => StorageKind.Dresser,
         };
 
         return new SetListRowData {
@@ -235,7 +215,7 @@ internal unsafe partial class LogWindow {
             IsMogstation = set.IsMogstation,
             ShowStorage = storageState is ItemStorageState.DresserSet or ItemStorageState.DresserLoose or ItemStorageState.Armoire,
             ShowArmoireWarning = piece?.ShowArmoireWarning ?? false,
-            StorageIconPart = iconPart,
+            StorageKind = storageKind,
             IconItemId = itemId,
         };
     }
@@ -246,17 +226,13 @@ internal unsafe partial class LogWindow {
         C.SetListSortMode = mode;
         C.SetListSortDirection = mode.DefaultDirection();
         C.Save();
-        _setListColumn?.SyncSortDirectionChrome();
-        QueueSetListRefresh();
+        _dirty = true;
     }
 
     private void OnSetListSortDirectionToggle() {
         C.SetListSortDirection = C.SetListSortDirection == ListSortDirection.Ascending ? ListSortDirection.Descending : ListSortDirection.Ascending;
         C.Save();
-        _setListColumn?.SyncSortDirectionChrome();
-        if (!IsOpen || !CanPaintLists())
-            return;
-        _pendingRebuildSetListOrderOnly = true;
+        _dirty = true;
     }
 
     private static string SetSublineText(SetStatus status) {
