@@ -1,0 +1,11 @@
+{
+    "Author": "saewoo",
+    "Name": "saewoo's Glamour Log",
+    "InternalName": "GlamourLog",
+    "Punchline": "Gotta collect 'em all",
+    "Description": "A log for all your glamours and other glam-related tweaks",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/saewoo-dalamud/ffxiv_glamourlog",
+    "LoadPriority": 0,
+    "DalamudApiLevel": 15
+}

@@ -1,0 +1,75 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Fetch Dalamud dev hooks
+        shell: pwsh
+        run: |
+          $verinfo = Invoke-RestMethod -Uri "https://kamori.goats.dev/Dalamud/Release/VersionInfo"
+          Invoke-WebRequest -Uri $verinfo.DownloadUrl -OutFile hooks.zip
+          $hooksPath = Join-Path $env:APPDATA "XIVLauncher\addon\Hooks\dev"
+          New-Item -ItemType Directory -Path $hooksPath -Force | Out-Null
+          Expand-Archive -Path hooks.zip -DestinationPath $hooksPath -Force
+
+      - name: Read plugin version
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$csproj = Get-Content GlamourLog/GlamourLog.csproj
+          $version = ($csproj.Project.PropertyGroup.Version | Where-Object { $_ }) | Select-Object -First 1
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        run: dotnet build GlamourLog/GlamourLog.csproj -c Release
+
+      - name: Locate package
+        id: package
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path GlamourLog/bin/Release -Filter *.zip -Recurse | Select-Object -First 1
+          if (-not $zip) { throw "No package zip produced by DalamudPackager - check build output" }
+          Copy-Item $zip.FullName latest.zip
+
+      - name: Build release notes
+        id: notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" -f "tag_name=${{ steps.version.outputs.version }}" --jq .body
+          $notes = "Fork of https://github.com/Jaksuhn/ffxiv_glamourlog.`n`n$generated"
+          $notes | Out-File -FilePath notes.md -Encoding utf8
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" latest.zip --title "${{ steps.version.outputs.version }}" --notes-file notes.md --repo ${{ github.repository }}
+
+      # GITHUB_TOKEN is scoped to this repo only, so notifying MyDalamudPlugins
+      # (a different repo) needs a PAT with repo access to it.
+      - name: Notify MyDalamudPlugins to rebuild pluginmaster.json
+        shell: bash
+        run: |
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.PLUGINMASTER_DISPATCH_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/saewoo-dalamud/MyDalamudPlugins/dispatches \
+            -d '{"event_type": "plugin-released"}'
