@@ -1,285 +1,90 @@
-using FFXIVClientStructs.FFXIV.Component.GUI;
-using GlamourLog.Nodes;
-using GlamourLog.Nodes.GuideWindow;
-using KamiToolKit.BaseTypes;
-using KamiToolKit.Nodes;
-using KamiToolKit.Nodes.Simplified;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Windowing;
+using Dalamud.Interface.Utility;
+
 namespace GlamourLog.Windows.GuideWindow;
 
-public unsafe partial class GuideWindow : NativeAddon {
+// Rendered with plain ImGui instead of KamiToolKit native nodes: this window doesn't need to
+// look like a native game addon, and native node attachment is what crashes on some clients
+// (see ExtraAddonButtons for the native-addon-attach case).
+public sealed partial class GuideWindow : Window {
     public const float WindowWidth = 944f;
     public const float WindowHeight = 600f;
 
-    private const float LeftColumnWidth = 316f;
-    private const float ContentPad = 8f;
-    private const float ColumnGap = 6f;
-    private const float RightColumnHorizontalPad = 40f;
-    private const float RightHeaderBodyGap = 14f;
-    private const float ScrollContentInset = 16f;
-    private const float CategoryHeadingHeight = 24f;
-    private const float CategoryHeadingGap = 4f;
-    private const float RightHeaderHeight = 68f;
-
-    private static readonly TextFlags HeaderTextFlags =
-        TextFlags.Emboss | TextFlags.WordWrap | TextFlags.MultiLine | unchecked((TextFlags)0x8000);
-
-    private bool _hasPendingScreenOrigin;
-    private Vector2 _pendingScreenOrigin;
-
-    private TextNode? _categoryHeading;
-    private SidebarNavList? _leftNavList;
-    private ResNode? _rightHeaderRow;
-    private ScrollingNode<VerticalListNode>? _rightScroll;
-    private VerticalLineNode? _splitter;
-    private TextNode? _rightTitle;
-    private float _rightTextWidth;
-
-    private readonly List<SidebarSection> _categorySections = [];
+    private const float LeftColumnWidth = 200f;
 
     private int _expandedCategoryIndex;
     private Page _selectedPage = null!;
 
+    public GuideWindow() : base("Help & Settings##GlamourLogGuide") {
+        Size = new Vector2(WindowWidth, WindowHeight);
+        SizeCondition = ImGuiCond.FirstUseEver;
+        _selectedPage = NavCategories[0].Pages[0];
+    }
+
     public void OpenOrToggleNear(Vector2 screenTopLeft) {
         if (IsOpen) {
-            Close();
+            IsOpen = false;
             return;
         }
 
-        _pendingScreenOrigin = ClampTopLeft(screenTopLeft);
-        _hasPendingScreenOrigin = true;
-        Open();
+        Position = ClampTopLeft(screenTopLeft);
+        PositionCondition = ImGuiCond.Always;
+        IsOpen = true;
     }
 
     public void OpenOrToggleCentered() {
-        var screen = AtkStage.Instance()->ScreenSize;
+        var screen = ImGuiHelpers.MainViewport.Size;
         var topLeft = new Vector2(
-            (screen.Width - WindowWidth) * 0.5f,
-            (screen.Height - WindowHeight) * 0.5f);
+            (screen.X - WindowWidth) * 0.5f,
+            (screen.Y - WindowHeight) * 0.5f);
         OpenOrToggleNear(topLeft);
     }
 
-    public void CloseIfOpen() {
-        if (IsOpen)
-            Close();
-    }
+    public void CloseIfOpen() => IsOpen = false;
 
     public static Vector2 ClampTopLeft(Vector2 origin) {
-        var screen = AtkStage.Instance()->ScreenSize;
-        var maxX = Math.Max(0f, screen.Width - WindowWidth);
-        var maxY = Math.Max(0f, screen.Height - WindowHeight);
+        var screen = ImGuiHelpers.MainViewport.Size;
+        var maxX = Math.Max(0f, screen.X - WindowWidth);
+        var maxY = Math.Max(0f, screen.Y - WindowHeight);
         return new Vector2(
             Math.Clamp(origin.X, 0f, maxX),
             Math.Clamp(origin.Y, 0f, maxY));
     }
 
-    protected override void OnSetup(AtkUnitBase* addon, Span<AtkValue> atkValueSpan) {
-        base.OnSetup(addon, atkValueSpan);
+    public override void Draw() {
+        // one-shot position lands only on the frame OpenOrToggleNear set it
+        PositionCondition = ImGuiCond.FirstUseEver;
 
-        if (_hasPendingScreenOrigin) {
-            SetWindowPosition(_pendingScreenOrigin);
-            _hasPendingScreenOrigin = false;
-        }
-
-        _rightPaneBlocks.Clear();
-        DisposeLeftNav();
-        _rightScroll?.Dispose();
-        _rightHeaderRow?.Dispose();
-        _splitter?.Dispose();
-        _categoryHeading?.Dispose();
-        _rightScroll = null;
-        _rightHeaderRow = null;
-        _splitter = null;
-        _categoryHeading = null;
-        _rightTitle = null;
-
-        BuildChrome();
-
-        SyncLeftNav();
-        PaintRight();
+        DrawSidebar();
+        ImGui.SameLine();
+        DrawRightPane();
     }
 
-    private void BuildChrome() {
-        _selectedPage = NavCategories[0].Pages[0];
-        _expandedCategoryIndex = 0;
-
-        var start = ContentStartPosition;
-        var size = ContentSize;
-
-        var innerLeft = start.X + ContentPad;
-        var innerTop = start.Y + ContentPad;
-        var innerBottom = start.Y + size.Y - ContentPad;
-        var innerH = innerBottom - innerTop;
-
-        var sepHalf = 1.5f;
-        var sepX = innerLeft + LeftColumnWidth + ColumnGap * 0.5f - sepHalf;
-        var rightInnerX = innerLeft + LeftColumnWidth + ColumnGap + RightColumnHorizontalPad;
-        var rightInnerW = start.X + size.X - ContentPad - rightInnerX - RightColumnHorizontalPad;
-        _rightTextWidth = Math.Max(40f, rightInnerW - ScrollContentInset);
-
-        var leftListTop = innerTop + CategoryHeadingHeight + CategoryHeadingGap;
-        var leftListH = innerBottom - leftListTop;
-
-        _categoryHeading = new TextNode {
-            Position = new Vector2(innerLeft, innerTop),
-            Size = new Vector2(LeftColumnWidth, CategoryHeadingHeight),
-            FontType = FontType.Jupiter,
-            FontSize = 20,
-            LineSpacing = 20,
-            AlignmentType = AlignmentType.Left,
-            TextColor = ColourPalette.HeadingGrey,
-            String = "Category",
-        };
-        _categoryHeading.RemoveTextFlags(TextFlags.Emboss);
-        _categoryHeading.AddTextFlags(TextFlags.Emboss);
-        _categoryHeading.AttachNode(this);
-
-        // not ScrollingListNode: its scroll collision layer misaligns list button hits
-        _leftNavList = new SidebarNavList {
-            Position = new Vector2(innerLeft, leftListTop),
-            Size = new Vector2(LeftColumnWidth, leftListH),
-            ItemSpacing = 0f,
-            FitWidth = true,
-        };
-        _leftNavList.AttachNode(this);
-
-        _splitter = new VerticalLineNode {
-            Position = new Vector2(sepX, innerTop),
-            Height = innerH,
-            Width = 3f,
-        };
-        _splitter.AttachNode(this);
-
-        _rightHeaderRow = new ResNode {
-            Position = new Vector2(rightInnerX, innerTop),
-            Size = new Vector2(_rightTextWidth, RightHeaderHeight),
-        };
-        CreateHeaderPlateNineGrid(new Vector2(_rightTextWidth, RightHeaderHeight)).AttachNode(_rightHeaderRow);
-        _rightTitle = new TextNode {
-            Size = new Vector2(_rightTextWidth, RightHeaderHeight),
-            FontType = FontType.Axis,
-            FontSize = 18,
-            LineSpacing = 18,
-            AlignmentType = AlignmentType.Center,
-            TextColor = ColourPalette.Cream,
-            TextFlags = HeaderTextFlags,
-        };
-        _rightTitle.AttachNode(_rightHeaderRow);
-        _rightHeaderRow.AttachNode(this);
-
-        var rightScrollTop = innerTop + RightHeaderHeight + RightHeaderBodyGap;
-        var rightScrollHeight = innerBottom - rightScrollTop;
-        _rightScroll = SimpleScrollList.Create(
-            new Vector2(rightInnerX, rightScrollTop),
-            new Vector2(rightInnerW, rightScrollHeight),
-            true);
-        _rightScroll.ContentNode.ItemSpacing = RightBlockSpacing;
-        _rightScroll.AttachNode(this);
+    private void DrawSidebar() {
+        if (!ImGui.BeginChild("##GuideSidebar", new Vector2(LeftColumnWidth, 0), true)) {
+            ImGui.EndChild();
+            return;
+        }
 
         for (var c = 0; c < NavCategories.Length; c++) {
-            var catIndex = c;
             var category = NavCategories[c];
+            var expanded = c == _expandedCategoryIndex;
 
-            var categoryRow = new SidebarCategoryRowNode(category.Title, () => OnParentCategoryClicked(catIndex));
-            var pages = new List<(SidebarPageRowNode Btn, Page Page)>();
+            if (ImGui.Selectable(category.Title, expanded))
+                _expandedCategoryIndex = c;
+
+            if (!expanded)
+                continue;
+
+            ImGui.Indent();
             foreach (var page in category.Pages) {
-                var captured = page;
-                pages.Add((new SidebarPageRowNode(page.SubCategoryTitle, () => OnSubClicked(captured)), page));
+                if (ImGui.Selectable(page.SubCategoryTitle, ReferenceEquals(page, _selectedPage)))
+                    _selectedPage = page;
             }
-
-            _categorySections.Add(new SidebarSection {
-                CategoryRow = categoryRow,
-                Pages = pages,
-            });
+            ImGui.Unindent();
         }
 
-        SyncLeftNav();
-        _rightScroll.RecalculateSizes();
+        ImGui.EndChild();
     }
-
-    // hiding in-place leaves collisions and results in overlaps which makes clicking on some rows impossible in certain collapse orders
-    private void SyncLeftNav() {
-        if (_leftNavList is null)
-            return;
-
-        var visible = new List<NodeBase>(_categorySections.Count * 2);
-        for (var i = 0; i < _categorySections.Count; i++) {
-            var section = _categorySections[i];
-            visible.Add(section.CategoryRow);
-
-            var expanded = i == _expandedCategoryIndex;
-            foreach (var (btn, page) in section.Pages) {
-                btn.SetPageSelected(expanded && ReferenceEquals(page, _selectedPage));
-                if (expanded)
-                    visible.Add(btn);
-            }
-        }
-
-        _leftNavList.SetManagedNodes(visible);
-    }
-
-    // page rows may be detached from the list; dispose them explicitly or they leak
-    private void DisposeLeftNav() {
-        _leftNavList?.ReleaseManagedNodes();
-
-        foreach (var section in _categorySections) {
-            section.CategoryRow.ClearClickHandlers();
-            section.CategoryRow.Dispose();
-            foreach (var (pageRow, _) in section.Pages) {
-                pageRow.ClearClickHandlers();
-                pageRow.Dispose();
-            }
-        }
-
-        _categorySections.Clear();
-        _leftNavList?.Dispose();
-        _leftNavList = null;
-    }
-
-    private void OnParentCategoryClicked(int catIndex) {
-        _expandedCategoryIndex = catIndex;
-        _selectedPage = NavCategories[catIndex].Pages[0];
-        SyncLeftNav();
-        PaintRight();
-    }
-
-    private void OnSubClicked(Page page) {
-        _selectedPage = page;
-        SyncLeftNav();
-        PaintRight();
-    }
-
-    private void PaintRight() {
-        if (_rightTitle is null || _rightScroll is null)
-            return;
-
-        _rightTitle.String = _selectedPage.SubCategoryTitle;
-        RebuildRightPanePage(_selectedPage);
-        _rightScroll.RecalculateSizes();
-        RelayoutRightPaneBlocks();
-        _rightScroll.RecalculateSizes();
-        _rightScroll.ScrollBarNode.ScrollPosition = 0;
-    }
-
-    protected override void OnFinalize(AtkUnitBase* addon) {
-        base.OnFinalize(addon);
-
-        DisposeLeftNav();
-        _rightPaneBlocks.Clear();
-        _categoryHeading = null;
-        _rightHeaderRow = null;
-        _rightScroll = null;
-        _splitter = null;
-        _rightTitle = null;
-    }
-
-    private static SimpleNineGridNode CreateHeaderPlateNineGrid(Vector2 size) => new() {
-        TexturePath = "ui/uld/BgParts.tex",
-        TextureCoordinates = new Vector2(1f, 65f),
-        TextureSize = new Vector2(32f, 32f),
-        LeftOffset = 12f,
-        RightOffset = 12f,
-        TopOffset = 8f,
-        BottomOffset = 8f,
-        Size = size,
-    };
 }

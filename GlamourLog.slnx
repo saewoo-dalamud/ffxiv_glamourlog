@@ -5,4 +5,6 @@
   <Project Path="GlamourLog/GlamourLog.csproj">
     <Platform Project="x64" />
   </Project>
+  <Project Path="FFXIVClientStructs/FFXIVClientStructs/FFXIVClientStructs.csproj" />
+  <Project Path="FFXIVClientStructs/InteropGenerator.Runtime/InteropGenerator.Runtime.csproj" />
 </Solution>
