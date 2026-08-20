@@ -11,7 +11,8 @@
 
 시작 전: `WORKFLOW.md` 읽기. 캐시된 요약 사용 금지, 매회 재확인.
 
-- 버전 결정/릴리즈 → `WORKFLOW.md#버저닝`
+- 버전 결정 → `WORKFLOW.md#버저닝`
+- 릴리즈 실행 → `WORKFLOW.md#릴리즈`
 - upstream 반영 → `WORKFLOW.md#리모트-3개`, `#브랜치-2개`
 - 새 저장소 셋업 → `WORKFLOW.md#새-저장소-셋업`
 - `MyDalamudPlugins` 등록 → `WORKFLOW.md#MyDalamudPlugins-등록`
